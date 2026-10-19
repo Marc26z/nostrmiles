@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Mileage — trip log with a Nostr backup</title>
+  <meta name="description" content="Log trips by odometer reading, total the miles, tag business vs personal and estimate the deduction. Backed up end-to-end encrypted on Nostr." />
+  <meta name="theme-color" content="#0b0810" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Mileage" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <script>
+    (function () {
+      try {
+        var stored = localStorage.getItem("ml_theme");
+        document.documentElement.setAttribute("data-theme", stored === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13 44 L20 4" />
+            <path d="M35 44 L28 4" />
+            <path d="M24 40 L24 34" />
+            <path d="M24 27 L24 21" />
+            <path d="M24 14 L24 8" />
+          </svg>
+        </span>
+        <span class="brand-text">Mileage</span>
+        <span class="brand-ver">0.01</span>
+      </div>
+      <div class="header-actions">
+        <span id="conn-status" class="conn" data-state="idle" title="Relay status">
+          <span class="dot"></span><span id="conn-text">local</span>
+        </span>
+        <button id="ident-btn" class="btn btn-ghost ident-btn" type="button" hidden>
+          <span class="ident-dot"></span><code id="ident-npub">…</code>
+        </button>
+        <button id="theme-btn" class="btn btn-ghost icon-btn" type="button" aria-label="Switch theme" title="Switch theme">
+          <span class="theme-icon" aria-hidden="true">🌙</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- Stats ------------------------------------------------------------->
+    <section class="card" aria-label="Totals">
+      <div class="stats">
+        <div class="stat">
+          <span class="stat-label">total</span>
+          <span class="stat-value" id="stat-total">0.0 mi</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">business</span>
+          <span class="stat-value good" id="stat-business">0.0 mi</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">deduction</span>
+          <span class="stat-value accent" id="stat-deduction">$0.00</span>
+        </div>
+      </div>
+      <div class="rate-row">
+        <label class="rate-label" for="rate-slider">rate</label>
+        <input id="rate-slider" class="slider" type="range" min="0" max="150" step="1" value="67" />
+        <output id="rate-value" class="rate-value" for="rate-slider">$0.67/mi</output>
+      </div>
+    </section>
+
+    <!-- New trip ---------------------------------------------------------->
+    <section class="card" aria-label="New trip">
+      <h2 class="card-title">new trip</h2>
+      <form id="trip-form" autocomplete="off">
+        <div class="row">
+          <input id="start-input" class="input" inputmode="decimal" placeholder="odometer start" aria-label="Odometer start" />
+          <input id="end-input" class="input" inputmode="decimal" placeholder="end" aria-label="Odometer end" />
+        </div>
+        <div class="row row-center">
+          <button id="biz-btn" class="btn btn-toggle on" type="button" aria-pressed="true">business</button>
+          <span id="dist-preview" class="muted small">enter readings</span>
+        </div>
+        <input id="note-input" class="input" placeholder="note (optional)" maxlength="200" aria-label="Note" />
+        <p id="form-error" class="error" hidden></p>
+        <button class="btn btn-primary btn-block" type="submit">add trip</button>
+      </form>
+    </section>
+
+    <!-- Trips ------------------------------------------------------------->
+    <section class="card" aria-label="Trips">
+      <div class="trips-head">
+        <h2 class="card-title">trips</h2>
+        <span id="trips-count" class="muted small">0</span>
+      </div>
+      <p id="trips-empty" class="muted small">no trips logged yet</p>
+      <ul id="trips-list" class="trips"></ul>
+    </section>
+
+    <!-- Nostr backup ------------------------------------------------------>
+    <section class="card" aria-label="Nostr backup">
+      <h2 class="card-title">nostr backup</h2>
+      <p class="muted small">
+        Your log is encrypted with your key before it ever reaches a relay — only you can read it back.
+        The same key works with the Mileage home-screen widget.
+      </p>
+
+      <div id="key-none" hidden>
+        <div class="row row-bottom">
+          <input id="nsec-input" class="input" type="password" placeholder="paste nsec1…" autocomplete="off" spellcheck="false" aria-label="Secret key" />
+          <button id="nsec-save" class="btn" type="button">save</button>
+        </div>
+        <button id="gen-key-btn" class="btn btn-ghost btn-block" type="button">or create a new key</button>
+        <p id="key-error" class="error" hidden></p>
+      </div>
+
+      <div id="key-have" hidden>
+        <div class="row row-center">
+          <span class="key-badge"><span class="ident-dot"></span><code id="key-npub">…</code></span>
+          <button id="key-change" class="btn btn-ghost" type="button">change</button>
+        </div>
+      </div>
+
+      <div id="key-new" class="key-new" hidden>
+        <p class="muted small">Copy this secret key now — it is the only way to restore the log on another device.</p>
+        <div class="copy-row">
+          <code id="new-nsec" class="copy-code"></code>
+          <button id="copy-nsec" class="btn" type="button">copy</button>
+        </div>
+      </div>
+
+      <input id="relay-input" class="input relay-input" placeholder="wss://relay…" spellcheck="false" aria-label="Relay" />
+
+      <div class="row row-center">
+        <button id="backup-btn" class="btn btn-primary" type="button">back up</button>
+        <button id="restore-btn" class="btn" type="button">restore</button>
+        <button id="auto-btn" class="btn btn-ghost auto-btn" type="button" aria-pressed="false">manual</button>
+      </div>
+
+      <p id="sync-msg" class="muted small" hidden></p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p class="muted small">
+        Backups are NIP-44 encrypted kind 30078 events addressed to your own key. Relays only ever see ciphertext.
+      </p>
+    </div>
+  </footer>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
